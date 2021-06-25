@@ -7,7 +7,7 @@ from bs4 import BeautifulSoup as bs
 from lxml import etree
 from selenium.common.exceptions import TimeoutException as SE_TimeoutExepction
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, ElementClickInterceptedException
 
 from datetime import datetime,timezone
 
@@ -193,19 +193,21 @@ def extract(url):
             text = button.get_attribute('jsaction')
             if text:
                 button.click()
-    except NoSuchElementException:
+    except (NoSuchElementException, ElementClickInterceptedException):
         pass
 
     full_dom = etree.HTML(driver.page_source)
     question_xpath = '/html/body/div[7]/div/div[9]/div[1]/div/div[2]/div[2]/div/div/div[2]/div/div/div/div[1]/div/div/g-accordion-expander/div[1]'
     for idx, e in enumerate(full_dom.xpath(question_xpath)):
-        question_path = '/html/body/div[7]/div/div[9]/div[1]/div/div[2]/div[2]/div/div/div[2]/div/div/div/div[1]/div/div[{}]/g-accordion-expander/div[1]'.format(idx+1)
-        button = driver.find_element_by_xpath(question_path)
-        text = button.get_attribute('jsaction')
-        if text:
-            has_question = True
-            button.click()
-    
+        try:
+            question_path = '/html/body/div[7]/div/div[9]/div[1]/div/div[2]/div[2]/div/div/div[2]/div/div/div/div[1]/div/div[{}]/g-accordion-expander/div[1]'.format(idx+1)
+            button = driver.find_element_by_xpath(question_path)
+            text = button.get_attribute('jsaction')
+            if text:
+                has_question = True
+                button.click()
+        except ElementClickInterceptedException:
+            continue
 
     raw_html = driver.page_source
     soup = bs(raw_html,features="lxml")
@@ -243,14 +245,16 @@ def extract(url):
                 outputs['knowledge_graph'] = knowledge_graph
         elif len(dom.xpath('//div/div[2]/div/div')) > 0 and len(dom.xpath('//div/div[1]/a/h3')) > 0:
             title = dom.xpath('//div/div[1]/a/h3')[0].text
-            url = r.find('a').get('href')
+            link = r.find('a').get('href')
             displayed_link = r.find('cite').text
             snippet = ''.join(dom.xpath('//div/div[2]/div/div')[0].itertext())
+            title = title.replace(displayed_link, '')
+
             organic_results.append({
                 'title': title,
                 'snippet': snippet,
                 'displayed_link': displayed_link,
-                'link': url
+                'link': link
             })
     if len(organic_results) > 0:
         outputs['organic_results'] = organic_results
@@ -260,8 +264,8 @@ def extract(url):
     outputs['search_metadata'] = {
         "status": "Success",
         "total_time_taken": (processed_t - created_t).total_seconds(),
-        "created_at": created_t.strftime('%Y-%m-%dT%H:%M:%SZ'),
-        "processed_at": processed_t.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        "created_at": created_t.strftime('%Y-%m-%dT%H:%M:%S +UTC'),
+        "processed_at": processed_t.strftime('%Y-%m-%dT%H:%M:%S +UTC'),
         "google_url": url,
     }
 
