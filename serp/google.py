@@ -7,8 +7,13 @@ from bs4 import BeautifulSoup as bs
 from lxml import etree
 from selenium.common.exceptions import TimeoutException as SE_TimeoutExepction
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import NoSuchElementException, ElementClickInterceptedException
-
+from selenium.common.exceptions import (
+    NoSuchElementException, 
+    ElementClickInterceptedException, 
+    StaleElementReferenceException,
+    ElementNotInteractableException
+)
+from time import sleep
 from datetime import datetime,timezone
 
 from .os_detect import OS as Os
@@ -18,7 +23,6 @@ SEARCH_PREFIX_LEN = len(SEARCH_PREFIX)
 DOMAIN = 'https://www.google.com'
 
 RELATED_SEARCH_BOX = '/html/body/div[7]/div[1]/div[10]/div[1]/div/div[4]/div/div[1]/div/div'
-
 
 def get_chrome_options_args(is_headless):
     chrome_options = Options()
@@ -30,7 +34,6 @@ def get_chrome_options_args(is_headless):
 
     if is_headless:
         chrome_options.add_argument("--headless")
-    if (Os().wsl or Os().windows) and is_headless:
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-setuid-sandbox")
@@ -40,13 +43,17 @@ def get_chrome_options_args(is_headless):
         chrome_options.add_argument("--disable-features=VizDisplayCompositor")
     return chrome_options
 
-def extract_quesionts(soup):
+def extract_questions(soup):
     related_questions = []
     for accordian_expanded in soup.findAll('g-accordion-expander'):
         
         question = accordian_expanded.find('div',{'role': 'button'}).text.strip()
+        if accordian_expanded.find('cite') is None:
+            continue
         display_link = accordian_expanded.find('cite').text.strip()
         link = accordian_expanded.find('a') # we assume the link should rank first
+        if link is None:
+            continue
         title = link.text.strip()
         link = link.get('href')
         snippet = accordian_expanded.find('div', {'data-attrid':"wa:/description"})
@@ -75,9 +82,9 @@ def extract_quesionts(soup):
 def extract_knowledge_graph(elem, dom):
     outputs = {}
     knowledge_graph = {}
-    if elem.find('div', {'class': 'kp-wholepage'}):
+    kp_wholepage_elem = elem.find('div', {'class': 'kp-wholepage'})
+    if kp_wholepage_elem:
         expandable_contents = []
-        kp_wholepage_elem = elem.find('div', {'class': 'kp-wholepage'})        
         if kp_wholepage_elem.find('g-expandable-content'):
             for content in kp_wholepage_elem.findAll('g-expandable-content'):
                 expandable_contents.append(content.text.strip())
@@ -92,8 +99,42 @@ def extract_knowledge_graph(elem, dom):
             e = dom.xpath(kg_title_xpath)[0]
             kg_title = ''.join(e.itertext()).strip()
             outputs['title'] = kg_title
+        
+        # obtain accordion
+        accordions = []
+        accordions_ctx = []
+        for g_accordion in kp_wholepage_elem.findAll('g-accordion-expander'):
+            divs = g_accordion.findChildren('div', recursive=False)
+            if len(divs) > 1:
+                title = divs[0].text.strip()
+                context = divs[1]
+                data = {'title': title}
+                if context.find('div', {'data-attrid':"wa:/description"}):
+                    context_snippet = context.find('div', {'data-attrid':"wa:/description"}).text.strip()
+                    data['snippet'] = context_snippet
+                if context.find('div', {'data-tts':"answers"}):
+                    context_title = context.find('div', {'data-tts':"answers"}).text.strip()
+                    data['answer'] = context_title
+                if context.find('cite'):
+                    displayed_link = context.find('cite').text.strip()
+                    data['displayed_link'] = displayed_link
+                if context.find('a'):
+                    data['link'] = context.find('a').get('href')
+                if len(data) > 0:
+                    accordions_ctx.append(data)
+            accordions.append(g_accordion)
 
-        data_attributes = elem.findAll('div', {'data-attrid': True})
+        if len(accordions) > 0:
+            # set value
+            if len(accordions_ctx) > 0:
+                outputs['accordions'] = accordions_ctx
+            
+            # remove elements
+            for g_accordion in kp_wholepage_elem.findAll('g-accordion-expander'):
+                g_accordion.decompose()
+        
+        # build attributes
+        data_attributes = kp_wholepage_elem.findAll('div', {'data-attrid': True})
         for attribute in data_attributes:
             attrid = attribute.get('data-attrid')
             if attrid is not None and attrid in ['description', 'subtitle']:
@@ -114,16 +155,17 @@ def extract_knowledge_graph(elem, dom):
                         })
                 else:
                     outputs[name.text.strip()] = value.text.strip()
-
+        
+        kp_dom = etree.HTML(str(kp_wholepage_elem))
         kg_summary = '//*[@id="kp-wp-tab-overview"]/div[1]/div/div/div/div/div/div/div/div/span[1]'
-        if len(dom.xpath(kg_summary)):
-            e = dom.xpath(kg_summary)[0]
+        if len(kp_dom.xpath(kg_summary)):
+            e = kp_dom.xpath(kg_summary)[0]
             kg_summary_text = ''.join(e.itertext()).strip()
             outputs['description'] = kg_summary_text
         # source
         source_xpath = '//*[@id="kp-wp-tab-overview"]/div[1]/div/div/div/div/div/div/div/div/span[2]/a'
-        if len(dom.xpath(source_xpath)):
-            e = dom.xpath(source_xpath)[0]
+        if len(kp_dom.xpath(source_xpath)):
+            e = kp_dom.xpath(source_xpath)[0]
             source_link = e.get('href')
             data_source = ''.join(e.itertext()).strip()
             outputs['source'] = {
@@ -146,9 +188,10 @@ def extract_knowledge_graph(elem, dom):
             outputs['people_also_search_for'] = people_also_search_for
     return outputs
 
-def extract_display_stats(full_dom):
+def extract_display_stats(full_dom, soup):
     time_stats = '//*[@id="result-stats"]/nobr'
     e = full_dom.xpath(time_stats)
+    data = {}
     if len(e) > 0:
         time_to_finish = ''.join(e[0].itertext()).strip()
         full_stats_xpath = '//*[@id="result-stats"]'
@@ -156,15 +199,27 @@ def extract_display_stats(full_dom):
         full_stats_text = ''.join(e[0].itertext()).strip()
         total_result_text = full_stats_text.replace(time_to_finish, '')
         total_results = total_result_text.split(' ')[1]
-        total = int(total_results.replace(',',''))
-        
+        if 'result' in total_results:
+            total_results = total_result_text.split(' ')[0]
+
+        if ',' in total_results:
+            total_results = total_results.replace(',','')
+        total = int(total_results)
         time_to_finish_text = time_to_finish.replace('(','').split(' ')[0]
         time_taken_displayed = float(time_to_finish_text)
-        return {
-            'total_results': total,
-            'time_taken_displayed': time_taken_displayed
-        }
-    return {}
+        data['total_results'] = total
+        data['time_taken_displayed'] = time_taken_displayed
+    
+    has_spelling_fix = soup.find('span', {'class': 'spell_orig'})
+    if has_spelling_fix:
+        spelling_fix = has_spelling_fix.text.strip()
+        query_displayed = soup.find('a', {'class': 'spell_orig'}).text.strip()
+        parent_div = has_spelling_fix.parent
+        data['showing_results_for'] = spelling_fix
+        data['spelling_fix'] = spelling_fix
+        data['query_displayed'] = query_displayed
+    
+    return data
 
 
 chrome_options = get_chrome_options_args(True)
@@ -173,16 +228,22 @@ options = {
 }
 
 # to be implement : inline_videos, inline_images
-def extract(url):
+def extract(url, location=None):
     has_question = False
 
     driver = webdriver.Chrome(
         executable_path='./chromedriver', seleniumwire_options=options,
         chrome_options=chrome_options
     )
+    params = {
+        "latitude": 1.3627936,
+        "longitude": 103.8737315,
+        "accuracy": 100
+    }
+    driver.execute_cdp_cmd("Emulation.setGeolocationOverride", params)
+
     wait = WebDriverWait(driver, 30)
     driver.get(url)
-
     created_t = datetime.now(timezone.utc)
 
     body = driver.find_element_by_xpath("//body").text
@@ -193,7 +254,7 @@ def extract(url):
             text = button.get_attribute('jsaction')
             if text:
                 button.click()
-    except (NoSuchElementException, ElementClickInterceptedException):
+    except (NoSuchElementException, ElementClickInterceptedException, StaleElementReferenceException):
         pass
 
     full_dom = etree.HTML(driver.page_source)
@@ -206,15 +267,31 @@ def extract(url):
             if text:
                 has_question = True
                 button.click()
-        except ElementClickInterceptedException:
+        except ( ElementClickInterceptedException, 
+            StaleElementReferenceException, 
+            ElementNotInteractableException ):
+            continue
+    #.                      /html/body/div[7]/div/div[9]/div[2]/div[1]/div/div[2]/div[5]/div/div/div/div[1]/div/div/div/div/div[8]/div/div[2]
+    kg_accorrdion_expand = '/html/body/div[7]/div/div[9]/div[2]/div[1]/div/div[2]/div[5]/div/div/div/div[1]/div/div/div/div/div[8]/div/div/div/div/div/g-accordion-expander/div[1]'
+    for idx, e in enumerate(full_dom.xpath(kg_accorrdion_expand)):
+        try:
+            kg_accorrdion = '/html/body/div[7]/div/div[9]/div[2]/div[1]/div/div[2]/div[5]/div/div/div/div[1]/div/div/div/div/div[8]/div/div[{}]/div/div/div/g-accordion-expander/div[1]'.format(idx+1)
+            button = driver.find_element_by_xpath(kg_accorrdion)
+            text = button.get_attribute('jsaction')
+            if text:
+                has_question = True
+                button.click()
+        except ( ElementClickInterceptedException, 
+            StaleElementReferenceException, 
+            ElementNotInteractableException ):
             continue
 
     raw_html = driver.page_source
     soup = bs(raw_html,features="lxml")
-
     outputs = {}
-    if has_question:
-        outputs['question'] = extract_quesionts(soup)
+    questions = extract_questions(soup)
+    if len(questions) > 0:
+        outputs['question'] = questions
 
 
     related_searches = []
@@ -231,11 +308,11 @@ def extract(url):
         if len(related_searches) > 0:
             outputs['related_searches'] = related_searches
 
-    search_information = extract_display_stats(full_dom)    
+    search_information = extract_display_stats(full_dom, soup)    
     if len(search_information) > 0:
         outputs['search_information'] = search_information
 
-    results= list(soup.findAll('div', {'class': 'g'}))
+    results = list(soup.findAll('div', {'class': 'g'}))
     organic_results = []
     for r in results:
         dom = etree.HTML(str(r))
@@ -246,16 +323,17 @@ def extract(url):
         elif len(dom.xpath('//div/div[2]/div/div')) > 0 and len(dom.xpath('//div/div[1]/a/h3')) > 0:
             title = dom.xpath('//div/div[1]/a/h3')[0].text
             link = r.find('a').get('href')
-            displayed_link = r.find('cite').text
             snippet = ''.join(dom.xpath('//div/div[2]/div/div')[0].itertext())
-            title = title.replace(displayed_link, '')
+            if title and r.find('cite'):
+                displayed_link = r.find('cite').text
 
-            organic_results.append({
-                'title': title,
-                'snippet': snippet,
-                'displayed_link': displayed_link,
-                'link': link
-            })
+                title = title.replace(displayed_link, '')
+                organic_results.append({
+                    'title': title,
+                    'snippet': snippet,
+                    'displayed_link': displayed_link,
+                    'link': link
+                })
     if len(organic_results) > 0:
         outputs['organic_results'] = organic_results
     
@@ -268,6 +346,11 @@ def extract(url):
         "processed_at": processed_t.strftime('%Y-%m-%dT%H:%M:%S +UTC'),
         "google_url": url,
     }
+    if location is not None:
+        outputs['search_metadata']['location'] = location
+
+
+    driver.quit()
 
     return outputs
 
@@ -275,8 +358,8 @@ def extract(url):
 if __name__ == '__main__':
     from tqdm import tqdm
     keywords = [
+        '2008 calendar',
         # 'Herman Miller與羅技電競椅', 
-        'Palantir公司創辦人', 
         # 'Jeff Bezos的兄弟是誰', 'Jeff Bezos去太空', '亞馬遜第二任CEO', '亞馬遜森林環保', 
         # '亞馬遜森林的生態被破壞', '亞馬遜森林比例2017年', '巴西 2012年GDP成長率', '台灣2015年GDP成長率'
         # 'TikTok與字節跳動的2020', '2018關鍵字解析', '馬來西亞大學教授性騷擾', '性騷擾防制法', '金正恩妹妹', '北韓飢荒', '法國IKEA監視員工',
