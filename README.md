@@ -31,6 +31,9 @@ python -m serp.google
 
 * Related searches
 
+## Not supported features
+
+* Video, News, Images
 
 ## Usage
 
