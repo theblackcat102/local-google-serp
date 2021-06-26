@@ -11,6 +11,32 @@ Most detail open source SERP script
 python -m serp.google
 ```
 
+## Supported features
+
+* Knowledge Graph extraction
+
+    - Accordion, Snippet, Attributes, Alternative search query, Images, Knowledge Graph Source
+
+* Spelling fix
+
+* Search stats : total results, time taken
+
+* Organic results
+
+    - title, link, snippet
+
+* Questions and Answers
+
+    - People also asked card
+
+* Related searches
 
 
-[Part of the cause to build a better search engine](https://theblackcat102.github.io/designing-a-simple-search-engine/)
+## Usage
+
+Useful for OSINT, knowledge graph extraction, co-occurance query research, data mining, machine readable google results.
+
+
+## Other
+
+[This is part of the cause to build a better search engine](https://theblackcat102.github.io/designing-a-simple-search-engine/)
