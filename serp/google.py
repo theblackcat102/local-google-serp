@@ -8,8 +8,8 @@ from lxml import etree
 from selenium.common.exceptions import TimeoutException as SE_TimeoutExepction
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import (
-    NoSuchElementException, 
-    ElementClickInterceptedException, 
+    NoSuchElementException,
+    ElementClickInterceptedException,
     StaleElementReferenceException,
     ElementNotInteractableException
 )
@@ -46,7 +46,7 @@ def get_chrome_options_args(is_headless):
 def extract_questions(soup):
     related_questions = []
     for accordian_expanded in soup.findAll('g-accordion-expander'):
-        
+
         question = accordian_expanded.find('div',{'role': 'button'}).text.strip()
         if accordian_expanded.find('cite') is None:
             continue
@@ -61,21 +61,21 @@ def extract_questions(soup):
             snippet = snippet.get_text(separator="\n")
         alt_search_link = None
         alt_search_query = None
-        
+
         question = {
             'title': title,
             'displayed_link': display_link,
-            'link': link, 
+            'link': link,
             'snippet': snippet
         }
         for a in accordian_expanded.findAll('a'):
             if SEARCH_PREFIX == a.get('href')[:SEARCH_PREFIX_LEN]:
                 alt_search_link = a.get('href')
                 alt_search_query = a.text.strip()
-        
+
                 question['question'] = alt_search_query
                 question['question_link'] = alt_search_link
-        
+
         related_questions.append(question)
     return related_questions
 
@@ -99,7 +99,7 @@ def extract_knowledge_graph(elem, dom):
             e = dom.xpath(kg_title_xpath)[0]
             kg_title = ''.join(e.itertext()).strip()
             outputs['title'] = kg_title
-        
+
         # obtain accordion
         accordions = []
         accordions_ctx = []
@@ -128,11 +128,11 @@ def extract_knowledge_graph(elem, dom):
             # set value
             if len(accordions_ctx) > 0:
                 outputs['accordions'] = accordions_ctx
-            
+
             # remove elements
             for g_accordion in kp_wholepage_elem.findAll('g-accordion-expander'):
                 g_accordion.decompose()
-        
+
         # build attributes
         data_attributes = kp_wholepage_elem.findAll('div', {'data-attrid': True})
         for attribute in data_attributes:
@@ -155,7 +155,7 @@ def extract_knowledge_graph(elem, dom):
                         })
                 else:
                     outputs[name.text.strip()] = value.text.strip()
-        
+
         kp_dom = etree.HTML(str(kp_wholepage_elem))
         kg_summary = '//*[@id="kp-wp-tab-overview"]/div[1]/div/div/div/div/div/div/div/div/span[1]'
         if len(kp_dom.xpath(kg_summary)):
@@ -183,7 +183,7 @@ def extract_knowledge_graph(elem, dom):
             data['name'] = t.text
             if len(data) > 1:
                 people_also_search_for.append(data)
-        
+
         if len(people_also_search_for) > 0:
             outputs['people_also_search_for'] = people_also_search_for
     return outputs
@@ -209,7 +209,7 @@ def extract_display_stats(full_dom, soup):
         time_taken_displayed = float(time_to_finish_text)
         data['total_results'] = total
         data['time_taken_displayed'] = time_taken_displayed
-    
+
     has_spelling_fix = soup.find('span', {'class': 'spell_orig'})
     if has_spelling_fix and soup.find('a', {'class': 'spell_orig'}):
         spelling_fix = has_spelling_fix.text.strip()
@@ -218,7 +218,7 @@ def extract_display_stats(full_dom, soup):
         data['showing_results_for'] = spelling_fix
         data['spelling_fix'] = spelling_fix
         data['query_displayed'] = query_displayed
-    
+
     return data
 
 def check_feature_snippet(raw_html):
@@ -236,7 +236,7 @@ def extract_feature_snippet(soup):
         title = dom.xpath('//div/div[1]/a/h3')[0].text
         link = result_block.find('a').get('href')
         displayed_link = result_block.find('cite').text
-        
+
         return {
             'texts': texts,
             'link': link,
@@ -271,13 +271,14 @@ def extract(query_target, url, location=None):
 
     body = driver.find_element_by_xpath("//body").text
     kg_expander = '/html/body/div[7]/div/div[9]/div[1]/div/div[2]/div[2]/div/div/div[1]/div/div/div[2]/div[4]/div/div/div/div[1]/div/div/div/div/div/div[2]/g-expandable-container/div/div[1]/div[1]/g-expandable-content[1]/span/div/g-text-expander/a'
-    try:    
+    try:
         if driver.find_element_by_xpath(kg_expander):
             button = driver.find_element_by_xpath(kg_expander)
             text = button.get_attribute('jsaction')
             if text:
                 button.click()
-    except (NoSuchElementException, ElementClickInterceptedException, StaleElementReferenceException):
+    except ( NoSuchElementException, ElementClickInterceptedException,
+        StaleElementReferenceException, ElementNotInteractableException ):
         pass
 
     full_dom = etree.HTML(driver.page_source)
@@ -290,9 +291,8 @@ def extract(query_target, url, location=None):
             if text:
                 has_question = True
                 button.click()
-        except ( ElementClickInterceptedException, 
-            StaleElementReferenceException, 
-            ElementNotInteractableException ):
+        except ( ElementClickInterceptedException, NoSuchElementException,
+            StaleElementReferenceException, ElementNotInteractableException ):
             continue
     #.                      /html/body/div[7]/div/div[9]/div[2]/div[1]/div/div[2]/div[5]/div/div/div/div[1]/div/div/div/div/div[8]/div/div[2]
     kg_accorrdion_expand = '/html/body/div[7]/div/div[9]/div[2]/div[1]/div/div[2]/div[5]/div/div/div/div[1]/div/div/div/div/div[8]/div/div/div/div/div/g-accordion-expander/div[1]'
@@ -304,8 +304,8 @@ def extract(query_target, url, location=None):
             if text:
                 has_question = True
                 button.click()
-        except ( ElementClickInterceptedException, 
-            StaleElementReferenceException, 
+        except ( ElementClickInterceptedException,
+            StaleElementReferenceException,
             ElementNotInteractableException ):
             continue
 
@@ -337,7 +337,7 @@ def extract(query_target, url, location=None):
         if len(related_searches) > 0:
             outputs['related_searches'] = related_searches
 
-    search_information = extract_display_stats(full_dom, soup)    
+    search_information = extract_display_stats(full_dom, soup)
     if len(search_information) > 0:
         outputs['search_information'] = search_information
         outputs['search_information']['query'] = query_target
@@ -370,7 +370,7 @@ def extract(query_target, url, location=None):
                 })
     if len(organic_results) > 0:
         outputs['organic_results'] = organic_results
-    
+
     processed_t = datetime.now(timezone.utc)
 
     outputs['search_metadata'] = {
@@ -393,17 +393,17 @@ if __name__ == '__main__':
     from tqdm import tqdm
     keywords = [
         'how to build a website',
-        # 'Herman Miller與羅技電競椅', 
-        # 'Jeff Bezos的兄弟是誰', 'Jeff Bezos去太空', '亞馬遜第二任CEO', '亞馬遜森林環保', 
+        # 'Herman Miller與羅技電競椅',
+        # 'Jeff Bezos的兄弟是誰', 'Jeff Bezos去太空', '亞馬遜第二任CEO', '亞馬遜森林環保',
         # '亞馬遜森林的生態被破壞', '亞馬遜森林比例2017年', '巴西 2012年GDP成長率', '台灣2015年GDP成長率'
         # 'TikTok與字節跳動的2020', '2018關鍵字解析', '馬來西亞大學教授性騷擾', '性騷擾防制法', '金正恩妹妹', '北韓飢荒', '法國IKEA監視員工',
-        # 'LGBT同志法案', 'C羅運動生涯', '大谷翔平老婆', '王柏融年薪', '台灣AZ 死亡案例', 
+        # 'LGBT同志法案', 'C羅運動生涯', '大谷翔平老婆', '王柏融年薪', '台灣AZ 死亡案例',
         # 'porsche 986 boxster 自排', 'posrche二手推薦',  '保時捷二手自排', '三洋機車二手','yamaha 機車二手', 'gogoro 機車價格', '120 cc 機車價格',
         # '街車', 'KTM Duke', '小綿羊', 'yamaha 鬼火', '台灣機車銷量','機車駕照','機車駕照體檢',
 
     ]
     for keyword in keywords:
-        
+
         encode_query = urllib.parse.urlencode({'q': keyword})
         url = 'https://www.google.com/search?{}&oq=1111%E4%BA%BA%E5%8A%9B%E9%8A%80%E8%A1%8C&aqs=chrome.0.69i59j0l8.940j0j9&sourceid=chrome&ie=UTF-8'.format(encode_query)
         outputs = extract(keyword, url)
