@@ -21,7 +21,7 @@ SEARCH_PREFIX = '/search'
 SEARCH_PREFIX_LEN = len(SEARCH_PREFIX)
 
 DOMAIN = 'https://www.google.com'
-
+FEATURE_SNIPPET_PATH = '/html/body/div[7]/div/div[9]/div[1]/div/div[2]/div[2]/div/div/div[1]/div/div[1]/div/div[1]'
 RELATED_SEARCH_BOX = '/html/body/div[7]/div[1]/div[10]/div[1]/div/div[4]/div/div[1]/div/div'
 
 def get_chrome_options_args(is_headless):
@@ -58,7 +58,7 @@ def extract_questions(soup):
         link = link.get('href')
         snippet = accordian_expanded.find('div', {'data-attrid':"wa:/description"})
         if snippet:
-            snippet = snippet.text                                    
+            snippet = snippet.get_text(separator="\n")
         alt_search_link = None
         alt_search_query = None
         
@@ -87,7 +87,7 @@ def extract_knowledge_graph(elem, dom):
         expandable_contents = []
         if kp_wholepage_elem.find('g-expandable-content'):
             for content in kp_wholepage_elem.findAll('g-expandable-content'):
-                expandable_contents.append(content.text.strip())
+                expandable_contents.append(content.get_text(separator="\n").strip())
         if len(expandable_contents) > 0:
             if 'knowledge_graph' not in outputs:
                 outputs['knowledge_graph'] = {}
@@ -110,10 +110,10 @@ def extract_knowledge_graph(elem, dom):
                 context = divs[1]
                 data = {'title': title}
                 if context.find('div', {'data-attrid':"wa:/description"}):
-                    context_snippet = context.find('div', {'data-attrid':"wa:/description"}).text.strip()
+                    context_snippet = context.find('div', {'data-attrid':"wa:/description"}).get_text(separator="\n").strip()
                     data['snippet'] = context_snippet
                 if context.find('div', {'data-tts':"answers"}):
-                    context_title = context.find('div', {'data-tts':"answers"}).text.strip()
+                    context_title = context.find('div', {'data-tts':"answers"}).get_text(separator="\n").strip()
                     data['answer'] = context_title
                 if context.find('cite'):
                     displayed_link = context.find('cite').text.strip()
@@ -211,7 +211,7 @@ def extract_display_stats(full_dom, soup):
         data['time_taken_displayed'] = time_taken_displayed
     
     has_spelling_fix = soup.find('span', {'class': 'spell_orig'})
-    if has_spelling_fix:
+    if has_spelling_fix and soup.find('a', {'class': 'spell_orig'}):
         spelling_fix = has_spelling_fix.text.strip()
         query_displayed = soup.find('a', {'class': 'spell_orig'}).text.strip()
         parent_div = has_spelling_fix.parent
@@ -221,6 +221,29 @@ def extract_display_stats(full_dom, soup):
     
     return data
 
+def check_feature_snippet(raw_html):
+    if 'websearch?p%3Dfeatured_snippets%2' in raw_html:
+        return True
+    return False
+
+def extract_feature_snippet(soup):
+    feature_snippet_block = soup.find('div', {'data-hveid': True, 'data-ved': True, 'lang': True})
+    if feature_snippet_block:
+        texts = [ block.get_text(separator="\n") for block in feature_snippet_block.findAll('div',{'data-md': True}) ]
+        result_block = feature_snippet_block.find('div', {'class': 'g'})
+
+        dom = etree.HTML(str(result_block))
+        title = dom.xpath('//div/div[1]/a/h3')[0].text
+        link = result_block.find('a').get('href')
+        displayed_link = result_block.find('cite').text
+        
+        return {
+            'texts': texts,
+            'link': link,
+            'displayed_link': displayed_link,
+            'title':title
+        }, feature_snippet_block
+    return {}, None
 
 chrome_options = get_chrome_options_args(True)
 options = {
@@ -228,7 +251,7 @@ options = {
 }
 
 # to be implement : inline_videos, inline_images
-def extract(url, location=None):
+def extract(query_target, url, location=None):
     has_question = False
 
     driver = webdriver.Chrome(
@@ -289,6 +312,12 @@ def extract(url, location=None):
     raw_html = driver.page_source
     soup = bs(raw_html,features="lxml")
     outputs = {}
+    if check_feature_snippet(raw_html):
+        featured_snippet, featured_snippet_block = extract_feature_snippet(soup)
+        if len(featured_snippet) > 0:
+            featured_snippet_block.decompose()
+            outputs['featured_snippet'] = featured_snippet
+
     questions = extract_questions(soup)
     if len(questions) > 0:
         outputs['question'] = questions
@@ -311,6 +340,11 @@ def extract(url, location=None):
     search_information = extract_display_stats(full_dom, soup)    
     if len(search_information) > 0:
         outputs['search_information'] = search_information
+        outputs['search_information']['query'] = query_target
+    else:
+        outputs['search_information'] = {
+            'query': query_target
+        }
 
     results = list(soup.findAll('div', {'class': 'g'}))
     organic_results = []
@@ -358,7 +392,7 @@ def extract(url, location=None):
 if __name__ == '__main__':
     from tqdm import tqdm
     keywords = [
-        '2008 calendar',
+        'how to build a website',
         # 'Herman Miller與羅技電競椅', 
         # 'Jeff Bezos的兄弟是誰', 'Jeff Bezos去太空', '亞馬遜第二任CEO', '亞馬遜森林環保', 
         # '亞馬遜森林的生態被破壞', '亞馬遜森林比例2017年', '巴西 2012年GDP成長率', '台灣2015年GDP成長率'
@@ -372,7 +406,7 @@ if __name__ == '__main__':
         
         encode_query = urllib.parse.urlencode({'q': keyword})
         url = 'https://www.google.com/search?{}&oq=1111%E4%BA%BA%E5%8A%9B%E9%8A%80%E8%A1%8C&aqs=chrome.0.69i59j0l8.940j0j9&sourceid=chrome&ie=UTF-8'.format(encode_query)
-        outputs = extract(url)
+        outputs = extract(keyword, url)
         print(keyword, list(outputs.keys()))
 
         print(outputs)
