@@ -34,13 +34,13 @@ def get_chrome_options_args(is_headless):
 
     if is_headless:
         chrome_options.add_argument("--headless")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-setuid-sandbox")
-        chrome_options.add_argument("--no-first-run")
-        chrome_options.add_argument("--no-zygote")
-        chrome_options.add_argument("--single-process")
-        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+        # chrome_options.add_argument("--disable-gpu")
+        # chrome_options.add_argument("--disable-dev-shm-usage")
+        # chrome_options.add_argument("--disable-setuid-sandbox")
+        # chrome_options.add_argument("--no-first-run")
+        # chrome_options.add_argument("--no-zygote")
+        # chrome_options.add_argument("--single-process")
+        # chrome_options.add_argument("--disable-features=VizDisplayCompositor")
     return chrome_options
 
 def extract_questions(soup):
@@ -390,7 +390,6 @@ def extract(query_target, url, location=None):
 
 
 if __name__ == '__main__':
-    from tqdm import tqdm
     keywords = [
         'how to build a website',
         # 'Herman Miller與羅技電競椅',
@@ -404,8 +403,8 @@ if __name__ == '__main__':
     ]
     for keyword in keywords:
 
-        encode_query = urllib.parse.urlencode({'q': keyword})
-        url = 'https://www.google.com/search?{}&oq=1111%E4%BA%BA%E5%8A%9B%E9%8A%80%E8%A1%8C&aqs=chrome.0.69i59j0l8.940j0j9&sourceid=chrome&ie=UTF-8'.format(encode_query)
+        encode_query = urllib.parse.urlencode({'q': keyword, 'oq': keyword})
+        url = 'https://www.google.com/search?{}aqs=chrome.0.69i59j0l8.940j0j9&sourceid=chrome&ie=UTF-8'.format(encode_query)
         outputs = extract(keyword, url)
         print(keyword, list(outputs.keys()))
 
